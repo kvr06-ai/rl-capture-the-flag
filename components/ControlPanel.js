@@ -1,16 +1,23 @@
 import { useState, useEffect } from 'react';
+import { TEAM_STRATEGIES } from '../lib/pretrainedAgents';
 
 const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState, gameController }) => {
   const [localConfig, setLocalConfig] = useState({...gameConfig});
   const [trainingEpisodes, setTrainingEpisodes] = useState(100);
   const [saveEnabled, setSaveEnabled] = useState(false);
+  const [usePretrainedAgents, setUsePretrainedAgents] = useState(false);
+  const [pretrainedStrategy, setPretrainedStrategy] = useState('BALANCED');
   
-  // Check if model saving is available
+  // Initialize state from game controller if available
   useEffect(() => {
     if (gameController) {
       // Check if browser supports localStorage (for model saving)
       const hasLocalStorage = typeof window !== 'undefined' && window.localStorage;
       setSaveEnabled(hasLocalStorage);
+      
+      // Get pre-trained mode settings
+      setUsePretrainedAgents(gameController.usePretrainedAgents || false);
+      setPretrainedStrategy(gameController.pretrainedStrategy || 'BALANCED');
     }
   }, [gameController]);
   
@@ -41,7 +48,17 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState, ga
   };
   
   const applyChanges = () => {
-    onConfigChange(localConfig);
+    // Include pre-trained settings in config update
+    onConfigChange({
+      ...localConfig,
+      usePretrainedAgents,
+      pretrainedStrategy
+    });
+    
+    // Apply pre-trained mode directly to controller if available
+    if (gameController) {
+      gameController.setPretrainedMode(usePretrainedAgents, pretrainedStrategy);
+    }
   };
   
   const handleStartTraining = () => {
@@ -81,9 +98,56 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState, ga
     }
   };
   
+  // Get available team strategies from the pretrainedAgents module
+  const teamStrategies = Object.keys(TEAM_STRATEGIES).map(key => ({
+    value: key,
+    label: TEAM_STRATEGIES[key].description
+  }));
+  
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
       <h2 className="text-xl font-bold mb-4">Control Panel</h2>
+      
+      {/* Mode Selection */}
+      <div className="mb-6">
+        <h3 className="font-semibold mb-2">Agent Mode</h3>
+        <div className="flex items-center mb-3">
+          <input
+            type="checkbox"
+            id="usePretrainedAgents"
+            checked={usePretrainedAgents}
+            onChange={(e) => setUsePretrainedAgents(e.target.checked)}
+            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+          />
+          <label htmlFor="usePretrainedAgents" className="ml-2 text-sm font-medium text-gray-900">
+            Use Pre-trained Expert Agents
+          </label>
+        </div>
+        
+        {usePretrainedAgents && (
+          <div className="mb-3">
+            <label className="block text-sm font-medium mb-1">Team Strategy</label>
+            <select
+              value={pretrainedStrategy}
+              onChange={(e) => setPretrainedStrategy(e.target.value)}
+              className="w-full border rounded p-2 text-sm"
+            >
+              {teamStrategies.map((strategy) => (
+                <option key={strategy.value} value={strategy.value}>
+                  {strategy.value}: {strategy.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        
+        <button
+          onClick={applyChanges}
+          className="w-full bg-blue-600 text-white py-1 rounded hover:bg-blue-700 mb-3"
+        >
+          Apply Mode Settings
+        </button>
+      </div>
       
       {/* Game controls */}
       <div className="mb-6">
@@ -114,9 +178,9 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState, ga
           <button
             onClick={handleStartTraining}
             className={`bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 ${
-              gameState.isTraining ? 'opacity-50 cursor-not-allowed' : ''
+              gameState.isTraining || usePretrainedAgents ? 'opacity-50 cursor-not-allowed' : ''
             }`}
-            disabled={gameState.isTraining}
+            disabled={gameState.isTraining || usePretrainedAgents}
           >
             {gameState.isTraining ? 'Training...' : 'Train Agents'}
           </button>
@@ -145,9 +209,10 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState, ga
               value={trainingEpisodes}
               onChange={(e) => setTrainingEpisodes(parseInt(e.target.value) || 100)}
               className="border rounded px-2 py-1 w-24 text-sm"
+              disabled={usePretrainedAgents}
             />
             
-            {saveEnabled && (
+            {saveEnabled && !usePretrainedAgents && (
               <div className="flex space-x-1 ml-auto">
                 <button
                   onClick={saveModels}
@@ -182,51 +247,53 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState, ga
         </div>
       </div>
       
-      {/* RL Parameters */}
-      <div className="mb-6">
-        <h3 className="font-semibold mb-2">Reinforcement Learning Parameters</h3>
-        
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">
-            Learning Rate (α): {localConfig.learningRate.toFixed(4)}
-          </label>
-          <div className="flex items-center space-x-2">
-            <input
-              {...sliderProps(0.0001, 0.01, 0.0001)}
-              value={localConfig.learningRate}
-              onChange={(e) => handleInputChange('learningRate', e.target.value, 'number')}
-            />
+      {/* RL Parameters - only show if not using pre-trained agents */}
+      {!usePretrainedAgents && (
+        <div className="mb-6">
+          <h3 className="font-semibold mb-2">Reinforcement Learning Parameters</h3>
+          
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-1">
+              Learning Rate (α): {localConfig.learningRate.toFixed(4)}
+            </label>
+            <div className="flex items-center space-x-2">
+              <input
+                {...sliderProps(0.0001, 0.01, 0.0001)}
+                value={localConfig.learningRate}
+                onChange={(e) => handleInputChange('learningRate', e.target.value, 'number')}
+              />
+            </div>
+          </div>
+          
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-1">
+              Discount Factor (γ): {localConfig.discountFactor.toFixed(2)}
+            </label>
+            <div className="flex items-center space-x-2">
+              <input
+                {...sliderProps(0.5, 0.99, 0.01)}
+                value={localConfig.discountFactor}
+                onChange={(e) => handleInputChange('discountFactor', e.target.value, 'number')}
+              />
+            </div>
+          </div>
+          
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-1">
+              Exploration Rate (ε): {localConfig.explorationRate.toFixed(2)}
+            </label>
+            <div className="flex items-center space-x-2">
+              <input
+                {...sliderProps(0.01, 1.0, 0.01)}
+                value={localConfig.explorationRate}
+                onChange={(e) => handleInputChange('explorationRate', e.target.value, 'number')}
+              />
+            </div>
           </div>
         </div>
-        
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">
-            Discount Factor (γ): {localConfig.discountFactor.toFixed(2)}
-          </label>
-          <div className="flex items-center space-x-2">
-            <input
-              {...sliderProps(0.5, 0.99, 0.01)}
-              value={localConfig.discountFactor}
-              onChange={(e) => handleInputChange('discountFactor', e.target.value, 'number')}
-            />
-          </div>
-        </div>
-        
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">
-            Exploration Rate (ε): {localConfig.explorationRate.toFixed(2)}
-          </label>
-          <div className="flex items-center space-x-2">
-            <input
-              {...sliderProps(0.01, 1.0, 0.01)}
-              value={localConfig.explorationRate}
-              onChange={(e) => handleInputChange('explorationRate', e.target.value, 'number')}
-            />
-          </div>
-        </div>
-      </div>
+      )}
       
-      {/* Reward Weights */}
+      {/* Reward Weights - show for both modes */}
       <div className="mb-6">
         <h3 className="font-semibold mb-2">Reward Weights</h3>
         

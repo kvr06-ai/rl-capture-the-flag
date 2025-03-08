@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
+import { TEAM_STRATEGIES } from '../lib/pretrainedAgents';
 
 const StatsPanel = ({ gameState, gameController, gameConfig }) => {
   const [stats, setStats] = useState({
@@ -11,7 +12,9 @@ const StatsPanel = ({ gameState, gameController, gameConfig }) => {
       redRewards: Array(10).fill(0),
       blueRewards: Array(10).fill(0),
       episodes: Array(10).fill(0)
-    }
+    },
+    usePretrainedAgents: false,
+    pretrainedStrategy: 'BALANCED'
   });
   
   const canvasRef = useRef(null);
@@ -51,7 +54,9 @@ const StatsPanel = ({ gameState, gameController, gameConfig }) => {
           redRewards,
           blueRewards,
           episodes: performanceMetrics.episodeSteps.slice(-10)
-        }
+        },
+        usePretrainedAgents: performanceMetrics.usePretrainedAgents || false,
+        pretrainedStrategy: performanceMetrics.pretrainedStrategy || 'BALANCED'
       });
     }, 1000);
     
@@ -83,7 +88,9 @@ const StatsPanel = ({ gameState, gameController, gameConfig }) => {
               redRewards: newRedRewards,
               blueRewards: newBlueRewards,
               episodes: newEpisodes
-            }
+            },
+            usePretrainedAgents: false,
+            pretrainedStrategy: 'BALANCED'
           };
         });
       }, 1000);
@@ -194,6 +201,15 @@ const StatsPanel = ({ gameState, gameController, gameConfig }) => {
     );
   };
   
+  // Get roles description for pre-trained strategy
+  const getStrategyDescription = (strategy) => {
+    if (TEAM_STRATEGIES[strategy]) {
+      const roles = TEAM_STRATEGIES[strategy].roles;
+      return roles.map(role => role.charAt(0).toUpperCase() + role.slice(1)).join(', ');
+    }
+    return 'Balanced';
+  };
+  
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
       <h2 className="text-xl font-bold mb-4">Statistics</h2>
@@ -259,29 +275,53 @@ const StatsPanel = ({ gameState, gameController, gameConfig }) => {
       </div>
       
       <div className="mb-4">
-        <h3 className="font-semibold mb-2">Learning Status</h3>
-        <div className="text-sm space-y-2">
-          <div className="flex justify-between">
-            <span>Training Mode:</span>
-            <span className={`font-medium ${gameState.isTraining ? 'text-green-600' : 'text-gray-600'}`}>
-              {gameState.isTraining ? 'Active' : 'Inactive'}
-            </span>
+        <h3 className="font-semibold mb-2">Agent Configuration</h3>
+        {stats.usePretrainedAgents ? (
+          <div className="text-sm space-y-2">
+            <div className="flex justify-between">
+              <span>Agent Type:</span>
+              <span className="font-medium text-green-600">Pre-trained Experts</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Team Strategy:</span>
+              <span className="font-medium">{stats.pretrainedStrategy}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Team Composition:</span>
+              <span className="font-medium">{getStrategyDescription(stats.pretrainedStrategy)}</span>
+            </div>
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 text-xs text-yellow-700 mt-1">
+              Expert agents use pre-programmed strategies based on their assigned roles.
+            </div>
           </div>
-          <div className="flex justify-between">
-            <span>Learning Rate:</span>
-            <span className="font-mono">{gameConfig && gameConfig.learningRate ? gameConfig.learningRate.toFixed(4) : '0.0000'}</span>
+        ) : (
+          <div className="text-sm space-y-2">
+            <div className="flex justify-between">
+              <span>Agent Type:</span>
+              <span className="font-medium">RL Agents</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Training Mode:</span>
+              <span className={`font-medium ${gameState.isTraining ? 'text-green-600' : 'text-gray-600'}`}>
+                {gameState.isTraining ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Learning Rate:</span>
+              <span className="font-mono">{gameConfig && gameConfig.learningRate ? gameConfig.learningRate.toFixed(4) : '0.0000'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Exploration Rate:</span>
+              <span className="font-mono">{gameConfig && gameConfig.explorationRate ? gameConfig.explorationRate.toFixed(2) : '0.00'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Agent Strategy:</span>
+              <span className="font-medium">
+                {gameState.isTraining ? 'Learning' : 'Exploiting'}
+              </span>
+            </div>
           </div>
-          <div className="flex justify-between">
-            <span>Exploration Rate:</span>
-            <span className="font-mono">{gameConfig && gameConfig.explorationRate ? gameConfig.explorationRate.toFixed(2) : '0.00'}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Agent Strategy:</span>
-            <span className="font-medium">
-              {gameState.isTraining ? 'Learning' : 'Exploiting'}
-            </span>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
