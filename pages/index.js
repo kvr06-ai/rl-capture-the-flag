@@ -138,6 +138,7 @@ export default function Home() {
   const updateScore = useCallback((team, value) => {
     setGameState(prevState => {
       const key = team === 'red' ? 'redScore' : 'blueScore';
+      console.log(`Updating ${team} score by ${value}, new score: ${prevState[key] + value}`);
       return {
         ...prevState,
         [key]: prevState[key] + value

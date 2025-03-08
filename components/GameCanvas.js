@@ -65,12 +65,17 @@ const GameCanvas = ({ gameConfig, gameState, updateScore, gameController }) => {
       const result = localGameController.update();
       
       if (result) {
-        // Update scores in parent component
+        // Get the current game state
         const state = localGameController.getGameState();
-        if (updateScore && state) {
+        
+        // Update scores immediately when they change
+        if (state && updateScore) {
+          // Check if red score has increased
           if (state.redScore > gameState.redScore) {
             updateScore('red', state.redScore - gameState.redScore);
           }
+          
+          // Check if blue score has increased
           if (state.blueScore > gameState.blueScore) {
             updateScore('blue', state.blueScore - gameState.blueScore);
           }
@@ -92,7 +97,7 @@ const GameCanvas = ({ gameConfig, gameState, updateScore, gameController }) => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [gameState.isRunning, localGameController, gameState.redScore, gameState.blueScore]);
+  }, [gameState.isRunning, localGameController, gameState.redScore, gameState.blueScore, updateScore]);
 
   // Training mode effect
   useEffect(() => {
@@ -240,12 +245,15 @@ const GameCanvas = ({ gameConfig, gameState, updateScore, gameController }) => {
         ctx.fill();
       }
       
-      // Display agent ID
+      // Display agent ID - Convert from 0-based to 1-based indexing for display
       ctx.fillStyle = 'white';
       ctx.font = '8px Arial';
       ctx.textAlign = 'center';
+      // Extract the index number and add 1 to it
+      const indexStr = agent.id.split('-')[1];
+      const displayNum = (parseInt(indexStr) + 1).toString();
       ctx.fillText(
-        agent.id.split('-')[1], 
+        displayNum, 
         agent.x * CELL_SIZE + CELL_SIZE / 2, 
         agent.y * CELL_SIZE + CELL_SIZE / 2 + 3
       );
@@ -273,12 +281,15 @@ const GameCanvas = ({ gameConfig, gameState, updateScore, gameController }) => {
         ctx.fill();
       }
       
-      // Display agent ID
+      // Display agent ID - Convert from 0-based to 1-based indexing for display
       ctx.fillStyle = 'white';
       ctx.font = '8px Arial';
       ctx.textAlign = 'center';
+      // Extract the index number and add 1 to it
+      const indexStr = agent.id.split('-')[1];
+      const displayNum = (parseInt(indexStr) + 1).toString();
       ctx.fillText(
-        agent.id.split('-')[1], 
+        displayNum, 
         agent.x * CELL_SIZE + CELL_SIZE / 2, 
         agent.y * CELL_SIZE + CELL_SIZE / 2 + 3
       );
