@@ -1,0 +1,32 @@
+{
+  "name": "rl-ctf",
+  "version": "1.0.0",
+  "description": "Capture-the-Flag: Interactive Multi-Agent Reinforcement Learning Web App",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "jest"
+  },
+  "keywords": [
+    "reinforcement-learning",
+    "capture-the-flag",
+    "multi-agent",
+    "tensorflow.js"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.2.0",
+    "next": "^13.4.12",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.3.0",
+    "postcss": "^8.4.27",
+    "autoprefixer": "^10.4.14"
+  }
+}
