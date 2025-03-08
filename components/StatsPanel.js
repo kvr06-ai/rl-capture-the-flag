@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from 'react';
 
-const StatsPanel = ({ gameState, gameController }) => {
+const StatsPanel = ({ gameState, gameController, gameConfig }) => {
   const [stats, setStats] = useState({
     redReward: 0,
     blueReward: 0,
@@ -269,11 +269,11 @@ const StatsPanel = ({ gameState, gameController }) => {
           </div>
           <div className="flex justify-between">
             <span>Learning Rate:</span>
-            <span className="font-mono">{gameConfig?.learningRate.toFixed(4)}</span>
+            <span className="font-mono">{gameConfig && gameConfig.learningRate ? gameConfig.learningRate.toFixed(4) : '0.0000'}</span>
           </div>
           <div className="flex justify-between">
             <span>Exploration Rate:</span>
-            <span className="font-mono">{gameConfig?.explorationRate.toFixed(2)}</span>
+            <span className="font-mono">{gameConfig && gameConfig.explorationRate ? gameConfig.explorationRate.toFixed(2) : '0.00'}</span>
           </div>
           <div className="flex justify-between">
             <span>Agent Strategy:</span>

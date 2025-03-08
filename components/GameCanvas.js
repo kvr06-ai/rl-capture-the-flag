@@ -6,37 +6,41 @@ const CELL_SIZE = 25;
 const CANVAS_WIDTH = GRID_SIZE * CELL_SIZE;
 const CANVAS_HEIGHT = GRID_SIZE * CELL_SIZE;
 
-const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
+const GameCanvas = ({ gameConfig, gameState, updateScore, gameController }) => {
   const canvasRef = useRef(null);
   const heatmapCanvasRef = useRef(null);
   const animationRef = useRef(null);
-  const [gameController, setGameController] = useState(null);
+  const [localGameController, setLocalGameController] = useState(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState('red');
   const [customMode, setCustomMode] = useState(null); // null, 'obstacle', 'flag'
 
-  // Initialize game controller
+  // Initialize game controller if not provided
   useEffect(() => {
-    const controller = new GameController(
-      GRID_SIZE,
-      gameConfig.teamSize,
-      gameConfig.rewardWeights
-    );
-    
-    setGameController(controller);
+    if (gameController) {
+      setLocalGameController(gameController);
+    } else {
+      const controller = new GameController(
+        GRID_SIZE,
+        gameConfig.teamSize,
+        gameConfig.rewardWeights
+      );
+      
+      setLocalGameController(controller);
+    }
     
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, []);
+  }, [gameController]);
 
   // Update controller when config changes
   useEffect(() => {
-    if (!gameController) return;
+    if (!localGameController) return;
     
-    gameController.updateParameters({
+    localGameController.updateParameters({
       teamSize: gameConfig.teamSize,
       learningRate: gameConfig.learningRate,
       discountFactor: gameConfig.discountFactor,
@@ -44,11 +48,11 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
       rewardWeights: gameConfig.rewardWeights
     });
     
-  }, [gameController, gameConfig]);
+  }, [localGameController, gameConfig]);
 
   // Main game loop
   useEffect(() => {
-    if (!gameState.isRunning || !gameController || !canvasRef.current) {
+    if (!gameState.isRunning || !localGameController || !canvasRef.current) {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
         animationRef.current = null;
@@ -58,11 +62,11 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
     
     const runGameLoop = () => {
       // Update game state
-      const result = gameController.update();
+      const result = localGameController.update();
       
       if (result) {
         // Update scores in parent component
-        const state = gameController.getGameState();
+        const state = localGameController.getGameState();
         if (updateScore && state) {
           if (state.redScore > gameState.redScore) {
             updateScore('red', state.redScore - gameState.redScore);
@@ -88,32 +92,32 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [gameState.isRunning, gameController, gameState.redScore, gameState.blueScore]);
+  }, [gameState.isRunning, localGameController, gameState.redScore, gameState.blueScore]);
 
   // Training mode effect
   useEffect(() => {
-    if (!gameController) return;
+    if (!localGameController) return;
     
     if (gameState.isTraining) {
-      gameController.startTraining();
+      localGameController.startTraining();
     } else {
-      gameController.stopTraining();
+      localGameController.stopTraining();
     }
-  }, [gameController, gameState.isTraining]);
+  }, [localGameController, gameState.isTraining]);
 
   // Reset game when requested
   useEffect(() => {
-    if (!gameController) return;
+    if (!localGameController) return;
     
     if (gameState.reset) {
-      gameController.reset();
+      localGameController.reset();
       renderGame();
     }
-  }, [gameController, gameState.reset]);
+  }, [localGameController, gameState.reset]);
 
   // Handle canvas click for customization
   const handleCanvasClick = (e) => {
-    if (!customMode || !gameController || !canvasRef.current) return;
+    if (!customMode || !localGameController || !canvasRef.current) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
     const x = Math.floor((e.clientX - rect.left) / CELL_SIZE);
@@ -121,20 +125,20 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
     
     if (customMode === 'obstacle') {
       // Add or remove obstacle
-      const wallExists = gameController.environment.walls.some(
+      const wallExists = localGameController.environment.walls.some(
         wall => wall.x === x && wall.y === y
-      ) || gameController.customObstacles.some(
+      ) || localGameController.customObstacles.some(
         wall => wall.x === x && wall.y === y
       );
       
       if (wallExists) {
-        gameController.removeObstacle(x, y);
+        localGameController.removeObstacle(x, y);
       } else {
-        gameController.addObstacle(x, y);
+        localGameController.addObstacle(x, y);
       }
     } else if (customMode === 'flag') {
       // Update flag position
-      gameController.updateFlagPosition(selectedTeam, x, y);
+      localGameController.updateFlagPosition(selectedTeam, x, y);
     }
     
     renderGame();
@@ -152,11 +156,11 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
 
   // Render the game canvas
   const renderGame = () => {
-    if (!gameController || !canvasRef.current) return;
+    if (!localGameController || !canvasRef.current) return;
     
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const gameState = gameController.getGameState();
+    const gameState = localGameController.getGameState();
     
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -288,11 +292,11 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
 
   // Render heatmap visualization
   const renderHeatmap = () => {
-    if (!gameController || !heatmapCanvasRef.current) return;
+    if (!localGameController || !heatmapCanvasRef.current) return;
     
     const canvas = heatmapCanvasRef.current;
     const ctx = canvas.getContext('2d');
-    const heatmapData = gameController.getHeatmapData();
+    const heatmapData = localGameController.getHeatmapData();
     
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -317,10 +321,10 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
 
   // Initialize when the component mounts
   useEffect(() => {
-    if (canvasRef.current && gameController) {
+    if (canvasRef.current && localGameController) {
       renderGame();
     }
-  }, [gameController]);
+  }, [localGameController]);
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
