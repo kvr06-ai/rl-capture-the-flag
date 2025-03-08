@@ -1,10 +1,12 @@
 import { useRef, useEffect, useState } from 'react';
 
-const StatsPanel = ({ gameState }) => {
+const StatsPanel = ({ gameState, gameController }) => {
   const [stats, setStats] = useState({
     redReward: 0,
     blueReward: 0,
     episodes: 0,
+    redWinRate: 0,
+    blueWinRate: 0,
     history: {
       redRewards: Array(10).fill(0),
       blueRewards: Array(10).fill(0),
@@ -14,11 +16,52 @@ const StatsPanel = ({ gameState }) => {
   
   const canvasRef = useRef(null);
   
-  // Update stats when game state changes
+  // Update stats when game controller updates
   useEffect(() => {
-    // In a real application, we would track the actual rewards from the RL agents
-    // For the demo, we'll use simulated data
-    if (gameState.isRunning || gameState.isTraining) {
+    if (!gameController) return;
+    
+    const interval = setInterval(() => {
+      const performanceMetrics = gameController.getPerformanceMetrics();
+      const agentStats = gameController.getAgentStats();
+      
+      // Calculate team rewards
+      let redTotalReward = 0;
+      let blueTotalReward = 0;
+      
+      Object.keys(agentStats).forEach(id => {
+        if (id.startsWith('red')) {
+          redTotalReward += agentStats[id].totalReward;
+        } else {
+          blueTotalReward += agentStats[id].totalReward;
+        }
+      });
+      
+      // Extract history
+      const episodeRewards = performanceMetrics.episodeRewards.slice(-10);
+      const redRewards = episodeRewards.map(ep => ep.red);
+      const blueRewards = episodeRewards.map(ep => ep.blue);
+      
+      setStats({
+        redReward: redTotalReward,
+        blueReward: blueTotalReward,
+        episodes: performanceMetrics.totalEpisodes,
+        redWinRate: performanceMetrics.redWinRate,
+        blueWinRate: performanceMetrics.blueWinRate,
+        history: {
+          redRewards,
+          blueRewards,
+          episodes: performanceMetrics.episodeSteps.slice(-10)
+        }
+      });
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [gameController]);
+  
+  // Update when game state changes
+  useEffect(() => {
+    if (!gameController) {
+      // Fallback to simulated data when no controller is available
       const interval = setInterval(() => {
         setStats(prevStats => {
           // Simulate accumulated rewards
@@ -34,6 +77,8 @@ const StatsPanel = ({ gameState }) => {
             redReward: prevStats.redReward + redRewardDelta,
             blueReward: prevStats.blueReward + blueRewardDelta,
             episodes: prevStats.episodes + 1,
+            redWinRate: gameState.redScore > gameState.blueScore ? 0.6 : 0.4,
+            blueWinRate: gameState.blueScore > gameState.redScore ? 0.6 : 0.4,
             history: {
               redRewards: newRedRewards,
               blueRewards: newBlueRewards,
@@ -45,7 +90,7 @@ const StatsPanel = ({ gameState }) => {
       
       return () => clearInterval(interval);
     }
-  }, [gameState.isRunning, gameState.isTraining, gameState.redScore, gameState.blueScore]);
+  }, [gameState.isRunning, gameState.isTraining, gameState.redScore, gameState.blueScore, gameController]);
   
   // Draw reward history chart
   useEffect(() => {
@@ -87,11 +132,11 @@ const StatsPanel = ({ gameState }) => {
     ctx.beginPath();
     
     stats.history.redRewards.forEach((value, index) => {
-      const x = (index / (stats.history.redRewards.length - 1)) * width;
+      const x = (index / (stats.history.redRewards.length - 1 || 1)) * width;
       const y = height - (value / maxValue) * height;
       
-      if (index === 0) {
-        ctx.moveTo(x, y);
+      if (index === 0 || isNaN(y)) {
+        ctx.moveTo(x, height - 1);
       } else {
         ctx.lineTo(x, y);
       }
@@ -105,11 +150,11 @@ const StatsPanel = ({ gameState }) => {
     ctx.beginPath();
     
     stats.history.blueRewards.forEach((value, index) => {
-      const x = (index / (stats.history.blueRewards.length - 1)) * width;
+      const x = (index / (stats.history.blueRewards.length - 1 || 1)) * width;
       const y = height - (value / maxValue) * height;
       
-      if (index === 0) {
-        ctx.moveTo(x, y);
+      if (index === 0 || isNaN(y)) {
+        ctx.moveTo(x, height - 1);
       } else {
         ctx.lineTo(x, y);
       }
@@ -134,20 +179,43 @@ const StatsPanel = ({ gameState }) => {
     
   }, [stats]);
   
+  // Format numbers for display
+  const formatNumber = (num) => {
+    return Number(num).toFixed(1);
+  };
+  
+  // Calculate the reward difference
+  const getRewardDifference = (red, blue) => {
+    const diff = red - blue;
+    return (
+      <span className={`font-mono ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-600' : 'text-gray-600'}`}>
+        {diff > 0 ? '+' : ''}{formatNumber(diff)}
+      </span>
+    );
+  };
+  
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
       <h2 className="text-xl font-bold mb-4">Statistics</h2>
       
-      <div className="grid grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-3 gap-4 mb-4">
         <div className="text-center">
           <h3 className="font-semibold text-red-600">Red Team</h3>
-          <p className="text-2xl">{Math.round(stats.redReward)}</p>
+          <p className="text-2xl">{formatNumber(stats.redReward)}</p>
           <p className="text-xs text-gray-600">Cumulative Reward</p>
         </div>
         
         <div className="text-center">
+          <h3 className="font-semibold">Difference</h3>
+          <p className="text-2xl">
+            {getRewardDifference(stats.redReward, stats.blueReward)}
+          </p>
+          <p className="text-xs text-gray-600">Red vs Blue</p>
+        </div>
+        
+        <div className="text-center">
           <h3 className="font-semibold text-blue-600">Blue Team</h3>
-          <p className="text-2xl">{Math.round(stats.blueReward)}</p>
+          <p className="text-2xl">{formatNumber(stats.blueReward)}</p>
           <p className="text-xs text-gray-600">Cumulative Reward</p>
         </div>
       </div>
@@ -155,8 +223,28 @@ const StatsPanel = ({ gameState }) => {
       <div className="mb-4">
         <h3 className="font-semibold mb-2">Training Progress</h3>
         <div className="flex justify-between">
-          <p>Episodes: {stats.episodes}</p>
-          <p>Score: {gameState.redScore} - {gameState.blueScore}</p>
+          <p>Episodes: <span className="font-mono">{stats.episodes}</span></p>
+          <p>Score: <span className="font-mono">{gameState.redScore} - {gameState.blueScore}</span></p>
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <div className="text-sm">
+            <span className="text-red-600 font-semibold">Red Win Rate:</span>
+            <div className="w-full bg-gray-200 rounded-full h-2.5">
+              <div 
+                className="bg-red-600 h-2.5 rounded-full" 
+                style={{ width: `${stats.redWinRate * 100}%` }}></div>
+            </div>
+            <span className="text-xs float-right">{formatNumber(stats.redWinRate * 100)}%</span>
+          </div>
+          <div className="text-sm">
+            <span className="text-blue-600 font-semibold">Blue Win Rate:</span>
+            <div className="w-full bg-gray-200 rounded-full h-2.5">
+              <div 
+                className="bg-blue-600 h-2.5 rounded-full" 
+                style={{ width: `${stats.blueWinRate * 100}%` }}></div>
+            </div>
+            <span className="text-xs float-right">{formatNumber(stats.blueWinRate * 100)}%</span>
+          </div>
         </div>
       </div>
       
@@ -171,20 +259,26 @@ const StatsPanel = ({ gameState }) => {
       </div>
       
       <div className="mb-4">
-        <h3 className="font-semibold mb-2">Agent Strategies</h3>
+        <h3 className="font-semibold mb-2">Learning Status</h3>
         <div className="text-sm space-y-2">
           <div className="flex justify-between">
-            <span>Offensive Agents:</span>
-            <span className="font-medium">{Math.round(gameState.redScore > gameState.blueScore ? 2 : 1)}</span>
+            <span>Training Mode:</span>
+            <span className={`font-medium ${gameState.isTraining ? 'text-green-600' : 'text-gray-600'}`}>
+              {gameState.isTraining ? 'Active' : 'Inactive'}
+            </span>
           </div>
           <div className="flex justify-between">
-            <span>Defensive Agents:</span>
-            <span className="font-medium">{Math.round(gameState.redScore > gameState.blueScore ? 1 : 2)}</span>
+            <span>Learning Rate:</span>
+            <span className="font-mono">{gameConfig?.learningRate.toFixed(4)}</span>
           </div>
           <div className="flex justify-between">
-            <span>Coordination Level:</span>
+            <span>Exploration Rate:</span>
+            <span className="font-mono">{gameConfig?.explorationRate.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Agent Strategy:</span>
             <span className="font-medium">
-              {gameState.isTraining ? 'Improving' : 'Baseline'}
+              {gameState.isTraining ? 'Learning' : 'Exploiting'}
             </span>
           </div>
         </div>

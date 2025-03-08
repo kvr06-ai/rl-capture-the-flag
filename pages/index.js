@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import GameCanvas from '../components/GameCanvas';
 import ControlPanel from '../components/ControlPanel';
 import StatsPanel from '../components/StatsPanel';
+import { GameController } from '../lib/gameController';
 
 export default function Home() {
   const [gameConfig, setGameConfig] = useState({
@@ -22,12 +23,67 @@ export default function Home() {
     isTraining: false,
     redScore: 0,
     blueScore: 0,
-    currentEpisode: 0
+    currentEpisode: 0,
+    reset: false
   });
+  
+  const [gameController, setGameController] = useState(null);
+  const gameLoopRef = useRef(null);
+  
+  // Initialize game controller
+  useEffect(() => {
+    const controller = new GameController(
+      20,
+      gameConfig.teamSize,
+      gameConfig.rewardWeights
+    );
+    
+    setGameController(controller);
+    
+    return () => {
+      if (gameLoopRef.current) {
+        clearInterval(gameLoopRef.current);
+      }
+    };
+  }, []);
+  
+  // Update game state from controller
+  useEffect(() => {
+    if (!gameController || !gameState.isRunning) return;
+    
+    // Set up interval to fetch game state
+    gameLoopRef.current = setInterval(() => {
+      const controllerState = gameController.getGameState();
+      
+      setGameState(prevState => ({
+        ...prevState,
+        redScore: controllerState.redScore,
+        blueScore: controllerState.blueScore,
+        currentEpisode: controllerState.episode,
+        isTraining: controllerState.isTraining
+      }));
+    }, 500);
+    
+    return () => {
+      if (gameLoopRef.current) {
+        clearInterval(gameLoopRef.current);
+        gameLoopRef.current = null;
+      }
+    };
+  }, [gameController, gameState.isRunning]);
 
   const handleConfigChange = useCallback((newConfig) => {
-    setGameConfig(prevConfig => ({...prevConfig, ...newConfig}));
-  }, []);
+    setGameConfig(prevConfig => {
+      const updatedConfig = {...prevConfig, ...newConfig};
+      
+      // Update game controller with new config if it exists
+      if (gameController) {
+        gameController.updateParameters(updatedConfig);
+      }
+      
+      return updatedConfig;
+    });
+  }, [gameController]);
 
   const handleGameControl = useCallback((action) => {
     switch(action) {
@@ -38,23 +94,47 @@ export default function Home() {
         setGameState(prevState => ({...prevState, isRunning: false}));
         break;
       case 'reset':
+        if (gameController) {
+          gameController.reset();
+        }
         setGameState({
           isRunning: false,
           isTraining: false,
           redScore: 0,
           blueScore: 0,
-          currentEpisode: 0
+          currentEpisode: 0,
+          reset: true
         });
+        // Reset the reset flag after a short delay
+        setTimeout(() => {
+          setGameState(prev => ({...prev, reset: false}));
+        }, 100);
         break;
       case 'train':
-        setGameState(prevState => ({...prevState, isTraining: !prevState.isTraining}));
+        setGameState(prevState => {
+          const newState = {
+            ...prevState, 
+            isTraining: true,
+            isRunning: true
+          };
+          return newState;
+        });
+        break;
+      case 'stopTraining':
+        if (gameController) {
+          gameController.stopTraining();
+        }
+        setGameState(prevState => ({
+          ...prevState,
+          isTraining: false
+        }));
         break;
       default:
         break;
     }
-  }, []);
+  }, [gameController]);
 
-  // Allow updating scores from child components
+  // Handle score updates from the game canvas
   const updateScore = useCallback((team, value) => {
     setGameState(prevState => {
       const key = team === 'red' ? 'redScore' : 'blueScore';
@@ -84,6 +164,7 @@ export default function Home() {
               gameConfig={gameConfig} 
               gameState={gameState}
               updateScore={updateScore}
+              gameController={gameController}
             />
           </div>
           
@@ -93,9 +174,45 @@ export default function Home() {
               onConfigChange={handleConfigChange}
               onGameControl={handleGameControl}
               gameState={gameState}
+              gameController={gameController}
             />
             
-            <StatsPanel gameState={gameState} />
+            <StatsPanel 
+              gameState={gameState} 
+              gameConfig={gameConfig}
+              gameController={gameController}
+            />
+          </div>
+        </div>
+        
+        <div className="mt-8 bg-white rounded-lg shadow-lg p-4">
+          <h2 className="text-xl font-bold mb-4">About This Simulation</h2>
+          <p className="mb-4">
+            This application demonstrates multi-agent reinforcement learning in a classic Capture-the-Flag scenario. 
+            Agents learn to navigate the environment, capture enemy flags, and develop team strategies through 
+            deep Q-learning.
+          </p>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <h3 className="font-semibold mb-2">Game Rules</h3>
+              <ul className="list-disc pl-5 space-y-1">
+                <li>Each team has a flag in their territory</li>
+                <li>Agents try to capture the enemy flag and return it to their base</li>
+                <li>Agents can tag enemies in their own territory to send them back to their base</li>
+                <li>The team with more flag captures wins</li>
+              </ul>
+            </div>
+            
+            <div>
+              <h3 className="font-semibold mb-2">Reinforcement Learning</h3>
+              <ul className="list-disc pl-5 space-y-1">
+                <li>Agents use Deep Q-Networks (DQN) for decision making</li>
+                <li>Experience replay improves learning stability</li>
+                <li>Exploration vs. exploitation is controlled by Epsilon</li>
+                <li>Reward weights shape agent behavior toward offensive or defensive strategies</li>
+              </ul>
+            </div>
           </div>
         </div>
       </main>

@@ -1,5 +1,5 @@
-import { useRef, useEffect } from 'react';
-import * as tf from '@tensorflow/tfjs';
+import { useRef, useEffect, useState } from 'react';
+import { GameController } from '../lib/gameController';
 
 const GRID_SIZE = 20;
 const CELL_SIZE = 25;
@@ -8,36 +8,47 @@ const CANVAS_HEIGHT = GRID_SIZE * CELL_SIZE;
 
 const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
   const canvasRef = useRef(null);
+  const heatmapCanvasRef = useRef(null);
   const animationRef = useRef(null);
-  
-  // Game state
-  const gameDataRef = useRef({
-    grid: Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0)),
-    redTeam: [],
-    blueTeam: [],
-    redFlag: { x: 2, y: Math.floor(GRID_SIZE / 2) },
-    blueFlag: { x: GRID_SIZE - 3, y: Math.floor(GRID_SIZE / 2) },
-    walls: [],
-    redFlagHolder: null,
-    blueFlagHolder: null
-  });
+  const [gameController, setGameController] = useState(null);
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState('red');
+  const [customMode, setCustomMode] = useState(null); // null, 'obstacle', 'flag'
 
-  // Initialize game
+  // Initialize game controller
   useEffect(() => {
-    if (!canvasRef.current) return;
+    const controller = new GameController(
+      GRID_SIZE,
+      gameConfig.teamSize,
+      gameConfig.rewardWeights
+    );
     
-    initializeGame();
+    setGameController(controller);
     
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [gameConfig.teamSize]);
+  }, []);
+
+  // Update controller when config changes
+  useEffect(() => {
+    if (!gameController) return;
+    
+    gameController.updateParameters({
+      teamSize: gameConfig.teamSize,
+      learningRate: gameConfig.learningRate,
+      discountFactor: gameConfig.discountFactor,
+      explorationRate: gameConfig.explorationRate,
+      rewardWeights: gameConfig.rewardWeights
+    });
+    
+  }, [gameController, gameConfig]);
 
   // Main game loop
   useEffect(() => {
-    if (!gameState.isRunning) {
+    if (!gameState.isRunning || !gameController || !canvasRef.current) {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
         animationRef.current = null;
@@ -46,12 +57,23 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
     }
     
     const runGameLoop = () => {
-      if (!canvasRef.current) return;
+      // Update game state
+      const result = gameController.update();
       
-      // Update agent positions and states
-      updateAgents();
+      if (result) {
+        // Update scores in parent component
+        const state = gameController.getGameState();
+        if (updateScore && state) {
+          if (state.redScore > gameState.redScore) {
+            updateScore('red', state.redScore - gameState.redScore);
+          }
+          if (state.blueScore > gameState.blueScore) {
+            updateScore('blue', state.blueScore - gameState.blueScore);
+          }
+        }
+      }
       
-      // Draw the game
+      // Render game
       renderGame();
       
       // Continue the loop
@@ -66,231 +88,75 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [gameState.isRunning]);
+  }, [gameState.isRunning, gameController, gameState.redScore, gameState.blueScore]);
 
-  const initializeGame = () => {
-    const gameData = gameDataRef.current;
+  // Training mode effect
+  useEffect(() => {
+    if (!gameController) return;
     
-    // Create walls (simple pattern for now)
-    gameData.walls = [];
-    for (let i = 6; i < GRID_SIZE - 6; i++) {
-      if (i % 3 !== 0) { // Gap in walls
-        gameData.walls.push({ x: Math.floor(GRID_SIZE / 2), y: i });
-      }
+    if (gameState.isTraining) {
+      gameController.startTraining();
+    } else {
+      gameController.stopTraining();
     }
+  }, [gameController, gameState.isTraining]);
+
+  // Reset game when requested
+  useEffect(() => {
+    if (!gameController) return;
     
-    // Initialize teams
-    gameData.redTeam = [];
-    gameData.blueTeam = [];
+    if (gameState.reset) {
+      gameController.reset();
+      renderGame();
+    }
+  }, [gameController, gameState.reset]);
+
+  // Handle canvas click for customization
+  const handleCanvasClick = (e) => {
+    if (!customMode || !gameController || !canvasRef.current) return;
     
-    for (let i = 0; i < gameConfig.teamSize; i++) {
-      gameData.redTeam.push({
-        id: `red-${i}`,
-        x: 1,
-        y: 3 + i * 3,
-        hasFlag: false,
-        agent: initializeAgent('red')
-      });
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / CELL_SIZE);
+    const y = Math.floor((e.clientY - rect.top) / CELL_SIZE);
+    
+    if (customMode === 'obstacle') {
+      // Add or remove obstacle
+      const wallExists = gameController.environment.walls.some(
+        wall => wall.x === x && wall.y === y
+      ) || gameController.customObstacles.some(
+        wall => wall.x === x && wall.y === y
+      );
       
-      gameData.blueTeam.push({
-        id: `blue-${i}`,
-        x: GRID_SIZE - 2,
-        y: 3 + i * 3,
-        hasFlag: false,
-        agent: initializeAgent('blue')
-      });
+      if (wallExists) {
+        gameController.removeObstacle(x, y);
+      } else {
+        gameController.addObstacle(x, y);
+      }
+    } else if (customMode === 'flag') {
+      // Update flag position
+      gameController.updateFlagPosition(selectedTeam, x, y);
     }
     
     renderGame();
   };
 
-  const initializeAgent = (team) => {
-    // In a real app, this would be a more complex model
-    // For demo purposes, we'll create a simple model
-    const model = tf.sequential();
-    model.add(tf.layers.dense({
-      units: 64,
-      activation: 'relu',
-      inputShape: [GRID_SIZE * GRID_SIZE * 3] // Simplified state representation
-    }));
-    model.add(tf.layers.dense({
-      units: 64,
-      activation: 'relu'
-    }));
-    model.add(tf.layers.dense({
-      units: 5, // Up, down, left, right, stay
-      activation: 'linear'
-    }));
-    
-    // Compile the model
-    model.compile({
-      optimizer: tf.train.adam(gameConfig.learningRate),
-      loss: 'meanSquaredError'
-    });
-    
-    return {
-      model,
-      memory: [],
-      team
-    };
+  // Toggle heatmap visualization
+  const toggleHeatmap = () => {
+    setShowHeatmap(!showHeatmap);
   };
 
-  const updateAgents = () => {
-    const gameData = gameDataRef.current;
-    
-    // Get current state
-    const state = getGameState();
-    
-    // Update red team
-    gameData.redTeam.forEach(agent => {
-      const action = selectAction(agent, state);
-      moveAgent(agent, action);
-      checkFlagCapture(agent, 'red');
-      checkTagging(agent, 'red');
-    });
-    
-    // Update blue team
-    gameData.blueTeam.forEach(agent => {
-      const action = selectAction(agent, state);
-      moveAgent(agent, action);
-      checkFlagCapture(agent, 'blue');
-      checkTagging(agent, 'blue');
-    });
+  // Toggle customization mode
+  const toggleCustomMode = (mode) => {
+    setCustomMode(customMode === mode ? null : mode);
   };
 
-  const getGameState = () => {
-    // In a real implementation, this would create a proper state representation
-    // For this demo, we'll return a simplified placeholder
-    return {};
-  };
-
-  const selectAction = (agent, state) => {
-    // Random action for demo purposes
-    // In a real implementation, we would use the agent's neural network
-    return Math.floor(Math.random() * 5);
-  };
-
-  const moveAgent = (agent, action) => {
-    // 0: stay, 1: up, 2: right, 3: down, 4: left
-    const dx = [0, 0, 1, 0, -1];
-    const dy = [0, -1, 0, 1, 0];
-    
-    const newX = agent.x + dx[action];
-    const newY = agent.y + dy[action];
-    
-    // Check if the move is valid (within bounds and not a wall)
-    if (isValidMove(newX, newY)) {
-      agent.x = newX;
-      agent.y = newY;
-    }
-  };
-
-  const isValidMove = (x, y) => {
-    const gameData = gameDataRef.current;
-    
-    // Check boundaries
-    if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
-      return false;
-    }
-    
-    // Check for walls
-    for (const wall of gameData.walls) {
-      if (wall.x === x && wall.y === y) {
-        return false;
-      }
-    }
-    
-    return true;
-  };
-
-  const checkFlagCapture = (agent, team) => {
-    const gameData = gameDataRef.current;
-    
-    if (team === 'red') {
-      // Red team capturing blue flag
-      const blueFlag = gameData.blueFlag;
-      if (!agent.hasFlag && agent.x === blueFlag.x && agent.y === blueFlag.y && !gameData.blueFlagHolder) {
-        agent.hasFlag = true;
-        gameData.blueFlagHolder = agent.id;
-      }
-      
-      // Red team returning with flag to base
-      if (agent.hasFlag && agent.x <= 1) {
-        agent.hasFlag = false;
-        gameData.blueFlagHolder = null;
-        // Update score using the prop
-        if (updateScore) {
-          updateScore('red', 1);
-        }
-      }
-    } else {
-      // Blue team capturing red flag
-      const redFlag = gameData.redFlag;
-      if (!agent.hasFlag && agent.x === redFlag.x && agent.y === redFlag.y && !gameData.redFlagHolder) {
-        agent.hasFlag = true;
-        gameData.redFlagHolder = agent.id;
-      }
-      
-      // Blue team returning with flag to base
-      if (agent.hasFlag && agent.x >= GRID_SIZE - 2) {
-        agent.hasFlag = false;
-        gameData.redFlagHolder = null;
-        // Update score using the prop
-        if (updateScore) {
-          updateScore('blue', 1);
-        }
-      }
-    }
-  };
-
-  const checkTagging = (agent, team) => {
-    const gameData = gameDataRef.current;
-    
-    if (team === 'red') {
-      // Red team tagging blue team in red territory
-      if (agent.x <= GRID_SIZE / 2) {
-        gameData.blueTeam.forEach(blueAgent => {
-          if (blueAgent.x <= GRID_SIZE / 2 && agent.x === blueAgent.x && agent.y === blueAgent.y) {
-            // Reset blue agent position
-            blueAgent.x = GRID_SIZE - 2;
-            blueAgent.y = Math.floor(Math.random() * GRID_SIZE);
-            
-            // Drop flag if carrying
-            if (blueAgent.hasFlag) {
-              blueAgent.hasFlag = false;
-              gameData.redFlagHolder = null;
-              gameData.redFlag = { x: 2, y: Math.floor(GRID_SIZE / 2) };
-            }
-          }
-        });
-      }
-    } else {
-      // Blue team tagging red team in blue territory
-      if (agent.x >= GRID_SIZE / 2) {
-        gameData.redTeam.forEach(redAgent => {
-          if (redAgent.x >= GRID_SIZE / 2 && agent.x === redAgent.x && agent.y === redAgent.y) {
-            // Reset red agent position
-            redAgent.x = 1;
-            redAgent.y = Math.floor(Math.random() * GRID_SIZE);
-            
-            // Drop flag if carrying
-            if (redAgent.hasFlag) {
-              redAgent.hasFlag = false;
-              gameData.blueFlagHolder = null;
-              gameData.blueFlag = { x: GRID_SIZE - 3, y: Math.floor(GRID_SIZE / 2) };
-            }
-          }
-        });
-      }
-    }
-  };
-
+  // Render the game canvas
   const renderGame = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!gameController || !canvasRef.current) return;
     
+    const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const gameData = gameDataRef.current;
+    const gameState = gameController.getGameState();
     
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -321,15 +187,15 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
     
     // Draw walls
     ctx.fillStyle = '#555';
-    gameData.walls.forEach(wall => {
+    gameState.walls.forEach(wall => {
       ctx.fillRect(wall.x * CELL_SIZE, wall.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
     });
     
     // Draw flags
-    const redFlag = gameData.redFlag;
-    const blueFlag = gameData.blueFlag;
+    const redFlag = gameState.redFlag;
+    const blueFlag = gameState.blueFlag;
     
-    if (!gameData.redFlagHolder) {
+    if (!gameState.redFlagHolder) {
       ctx.fillStyle = 'red';
       ctx.beginPath();
       ctx.moveTo(redFlag.x * CELL_SIZE, redFlag.y * CELL_SIZE);
@@ -338,7 +204,7 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
       ctx.fill();
     }
     
-    if (!gameData.blueFlagHolder) {
+    if (!gameState.blueFlagHolder) {
       ctx.fillStyle = 'blue';
       ctx.beginPath();
       ctx.moveTo(blueFlag.x * CELL_SIZE + CELL_SIZE, blueFlag.y * CELL_SIZE);
@@ -348,7 +214,7 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
     }
     
     // Draw agents
-    gameData.redTeam.forEach(agent => {
+    gameState.redTeam.forEach(agent => {
       ctx.fillStyle = 'darkred';
       ctx.beginPath();
       ctx.arc(
@@ -369,9 +235,19 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
         ctx.lineTo((agent.x + 0.3) * CELL_SIZE, (agent.y + 0.1) * CELL_SIZE);
         ctx.fill();
       }
+      
+      // Display agent ID
+      ctx.fillStyle = 'white';
+      ctx.font = '8px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(
+        agent.id.split('-')[1], 
+        agent.x * CELL_SIZE + CELL_SIZE / 2, 
+        agent.y * CELL_SIZE + CELL_SIZE / 2 + 3
+      );
     });
     
-    gameData.blueTeam.forEach(agent => {
+    gameState.blueTeam.forEach(agent => {
       ctx.fillStyle = 'darkblue';
       ctx.beginPath();
       ctx.arc(
@@ -392,30 +268,135 @@ const GameCanvas = ({ gameConfig, gameState, updateScore }) => {
         ctx.lineTo((agent.x - 0.3) * CELL_SIZE, (agent.y + 0.1) * CELL_SIZE);
         ctx.fill();
       }
+      
+      // Display agent ID
+      ctx.fillStyle = 'white';
+      ctx.font = '8px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(
+        agent.id.split('-')[1], 
+        agent.x * CELL_SIZE + CELL_SIZE / 2, 
+        agent.y * CELL_SIZE + CELL_SIZE / 2 + 3
+      );
     });
+    
+    // Render heatmap if enabled
+    if (showHeatmap && heatmapCanvasRef.current) {
+      renderHeatmap();
+    }
+  };
+
+  // Render heatmap visualization
+  const renderHeatmap = () => {
+    if (!gameController || !heatmapCanvasRef.current) return;
+    
+    const canvas = heatmapCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const heatmapData = gameController.getHeatmapData();
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw heatmap for selected team
+    const teamData = heatmapData[selectedTeam];
+    if (!teamData) return;
+    
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        const intensity = teamData[y][x];
+        if (intensity > 0) {
+          const alpha = Math.min(intensity * 0.8 + 0.2, 0.8);
+          ctx.fillStyle = selectedTeam === 'red' 
+            ? `rgba(255, 0, 0, ${alpha})` 
+            : `rgba(0, 0, 255, ${alpha})`;
+          ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+        }
+      }
+    }
   };
 
   // Initialize when the component mounts
   useEffect(() => {
-    if (canvasRef.current) {
+    if (canvasRef.current && gameController) {
       renderGame();
     }
-  }, []);
+  }, [gameController]);
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
-      <div className="mb-4 flex justify-between">
+      <div className="mb-4 flex justify-between items-center">
         <div className="text-red-600 font-bold">Red Team: {gameState.redScore}</div>
+        <div className="flex space-x-2">
+          <button 
+            onClick={toggleHeatmap}
+            className={`px-2 py-1 text-xs rounded ${showHeatmap ? 'bg-purple-600 text-white' : 'bg-gray-200'}`}
+          >
+            {showHeatmap ? 'Hide Heatmap' : 'Show Heatmap'}
+          </button>
+          {showHeatmap && (
+            <select 
+              value={selectedTeam} 
+              onChange={(e) => setSelectedTeam(e.target.value)}
+              className="text-xs border rounded px-1"
+            >
+              <option value="red">Red Team</option>
+              <option value="blue">Blue Team</option>
+            </select>
+          )}
+        </div>
         <div className="text-blue-600 font-bold">Blue Team: {gameState.blueScore}</div>
       </div>
-      <div className="flex justify-center">
+      
+      <div className="mb-4 flex justify-center space-x-2">
+        <button 
+          onClick={() => toggleCustomMode('obstacle')}
+          className={`px-2 py-1 text-xs rounded ${customMode === 'obstacle' ? 'bg-yellow-600 text-white' : 'bg-gray-200'}`}
+        >
+          {customMode === 'obstacle' ? 'Cancel' : 'Place Obstacles'}
+        </button>
+        <button 
+          onClick={() => toggleCustomMode('flag')}
+          className={`px-2 py-1 text-xs rounded ${customMode === 'flag' ? 'bg-green-600 text-white' : 'bg-gray-200'}`}
+        >
+          {customMode === 'flag' ? 'Cancel' : 'Move Flags'}
+        </button>
+        {customMode === 'flag' && (
+          <select 
+            value={selectedTeam} 
+            onChange={(e) => setSelectedTeam(e.target.value)}
+            className="text-xs border rounded px-1"
+          >
+            <option value="red">Red Flag</option>
+            <option value="blue">Blue Flag</option>
+          </select>
+        )}
+      </div>
+      
+      <div className="flex justify-center relative">
         <canvas 
           ref={canvasRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
           className="border border-gray-300"
+          onClick={handleCanvasClick}
         />
+        {showHeatmap && (
+          <canvas 
+            ref={heatmapCanvasRef}
+            width={CANVAS_WIDTH}
+            height={CANVAS_HEIGHT}
+            className="absolute top-0 left-0 pointer-events-none"
+          />
+        )}
       </div>
+      
+      {customMode && (
+        <div className="mt-2 text-sm text-center text-gray-500">
+          {customMode === 'obstacle' ? 
+            'Click to add or remove obstacles' : 
+            `Click to place the ${selectedTeam} flag`}
+        </div>
+      )}
     </div>
   );
 };

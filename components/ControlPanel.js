@@ -1,7 +1,23 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
-const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) => {
+const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState, gameController }) => {
   const [localConfig, setLocalConfig] = useState({...gameConfig});
+  const [trainingEpisodes, setTrainingEpisodes] = useState(100);
+  const [saveEnabled, setSaveEnabled] = useState(false);
+  
+  // Check if model saving is available
+  useEffect(() => {
+    if (gameController) {
+      // Check if browser supports localStorage (for model saving)
+      const hasLocalStorage = typeof window !== 'undefined' && window.localStorage;
+      setSaveEnabled(hasLocalStorage);
+    }
+  }, [gameController]);
+  
+  // Update local config when props change
+  useEffect(() => {
+    setLocalConfig({...gameConfig});
+  }, [gameConfig]);
   
   const handleInputChange = (key, value, type = 'direct') => {
     let newValue = value;
@@ -28,6 +44,13 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
     onConfigChange(localConfig);
   };
   
+  const handleStartTraining = () => {
+    if (gameController) {
+      gameController.maxEpisodes = trainingEpisodes;
+    }
+    onGameControl('train');
+  };
+  
   const sliderProps = (min, max, step) => ({
     type: 'range',
     min,
@@ -36,6 +59,28 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
     className: 'w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer'
   });
   
+  const saveModels = async () => {
+    if (gameController) {
+      const success = await gameController.saveAgents();
+      if (success) {
+        alert('Models saved successfully!');
+      } else {
+        alert('Failed to save models.');
+      }
+    }
+  };
+  
+  const loadModels = async () => {
+    if (gameController) {
+      const success = await gameController.loadAgents();
+      if (success) {
+        alert('Models loaded successfully!');
+      } else {
+        alert('No saved models found or loading failed.');
+      }
+    }
+  };
+  
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
       <h2 className="text-xl font-bold mb-4">Control Panel</h2>
@@ -43,7 +88,7 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
       {/* Game controls */}
       <div className="mb-6">
         <h3 className="font-semibold mb-2">Game Controls</h3>
-        <div className="flex space-x-2">
+        <div className="grid grid-cols-2 gap-2">
           {!gameState.isRunning ? (
             <button
               onClick={() => onGameControl('start')}
@@ -65,8 +110,9 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
           >
             Reset
           </button>
+          
           <button
-            onClick={() => onGameControl('train')}
+            onClick={handleStartTraining}
             className={`bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 ${
               gameState.isTraining ? 'opacity-50 cursor-not-allowed' : ''
             }`}
@@ -74,6 +120,52 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
           >
             {gameState.isTraining ? 'Training...' : 'Train Agents'}
           </button>
+          
+          {gameState.isTraining && (
+            <button
+              onClick={() => onGameControl('stopTraining')}
+              className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+            >
+              Stop Training
+            </button>
+          )}
+        </div>
+        
+        {/* Training episodes input */}
+        <div className="mt-2">
+          <label className="block text-sm font-medium mb-1">
+            Training Episodes:
+          </label>
+          <div className="flex items-center space-x-2">
+            <input
+              type="number"
+              min="10"
+              max="10000"
+              step="10"
+              value={trainingEpisodes}
+              onChange={(e) => setTrainingEpisodes(parseInt(e.target.value) || 100)}
+              className="border rounded px-2 py-1 w-24 text-sm"
+            />
+            
+            {saveEnabled && (
+              <div className="flex space-x-1 ml-auto">
+                <button
+                  onClick={saveModels}
+                  className="bg-purple-500 text-white text-xs px-2 py-1 rounded hover:bg-purple-600"
+                  disabled={!gameController}
+                >
+                  Save Models
+                </button>
+                <button
+                  onClick={loadModels}
+                  className="bg-indigo-500 text-white text-xs px-2 py-1 rounded hover:bg-indigo-600"
+                  disabled={!gameController}
+                >
+                  Load Models
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
       
@@ -96,7 +188,7 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
         
         <div className="mb-4">
           <label className="block text-sm font-medium mb-1">
-            Learning Rate (α): {localConfig.learningRate}
+            Learning Rate (α): {localConfig.learningRate.toFixed(4)}
           </label>
           <div className="flex items-center space-x-2">
             <input
@@ -109,7 +201,7 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
         
         <div className="mb-4">
           <label className="block text-sm font-medium mb-1">
-            Discount Factor (γ): {localConfig.discountFactor}
+            Discount Factor (γ): {localConfig.discountFactor.toFixed(2)}
           </label>
           <div className="flex items-center space-x-2">
             <input
@@ -122,7 +214,7 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
         
         <div className="mb-4">
           <label className="block text-sm font-medium mb-1">
-            Exploration Rate (ε): {localConfig.explorationRate}
+            Exploration Rate (ε): {localConfig.explorationRate.toFixed(2)}
           </label>
           <div className="flex items-center space-x-2">
             <input
@@ -140,7 +232,7 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
         
         <div className="mb-4">
           <label className="block text-sm font-medium mb-1">
-            Offense Reward: {localConfig.rewardWeights.offense}
+            Offense Reward: {localConfig.rewardWeights.offense.toFixed(1)}
           </label>
           <div className="flex items-center space-x-2">
             <input
@@ -153,7 +245,7 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
         
         <div className="mb-4">
           <label className="block text-sm font-medium mb-1">
-            Defense Reward: {localConfig.rewardWeights.defense}
+            Defense Reward: {localConfig.rewardWeights.defense.toFixed(1)}
           </label>
           <div className="flex items-center space-x-2">
             <input
@@ -166,7 +258,7 @@ const ControlPanel = ({ gameConfig, onConfigChange, onGameControl, gameState }) 
         
         <div className="mb-4">
           <label className="block text-sm font-medium mb-1">
-            Cooperation Reward: {localConfig.rewardWeights.cooperation}
+            Cooperation Reward: {localConfig.rewardWeights.cooperation.toFixed(1)}
           </label>
           <div className="flex items-center space-x-2">
             <input
